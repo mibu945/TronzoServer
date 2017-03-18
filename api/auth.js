@@ -37,7 +37,7 @@ export default class Authentication {
             if(err || !user) {
                 return handleError(err, res);
             }
-            res.json({token: createToken(user._id)}); 
+            res.json({token: createToken(user._id), _id: user._id}); 
         });
     }
     static auth(req, callback) {

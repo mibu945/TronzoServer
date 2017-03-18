@@ -2,12 +2,13 @@ var mongoose = require('mongoose');
 
 var userSchema = new mongoose.Schema({
     //user uploading data
-    ID: String,
+    name: String,
+    birthday: String,
+    gender: String,
     account: { type: String, unique: true, require: true},
     password: { type: String, require: true},   
-    email: String,
     description: String,
-    photo: Buffer,
+    profilePic: String,
     collections: [{
         type: mongoose.Schema.Types.ObjectId,
         unique: true,

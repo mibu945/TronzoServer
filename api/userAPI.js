@@ -40,7 +40,7 @@ export default class UserAPI {
     }
     //取得基本資訊
     static getUserByID(req, res) {
-        const account = req.query.userID;
+        const userID = req.query.userID;
         if (!userID) {
             return handleError("non-valid input", res);
         }
@@ -50,6 +50,7 @@ export default class UserAPI {
             }
             res.json({
                 _id: user._id,
+		name: user.name,
                 account: user.account,
                 describe: user.describe,
                 follows: user.follows
@@ -59,12 +60,15 @@ export default class UserAPI {
 
     //註冊新用戶
     static postUser(req, res){
+	const name = req.body.name;
         const account = req.body.account;
         const password = req.body.password;
+	const birthday = req.body.birthday;
+	const gender = req.body.gender;
 
         /* Check the inputs is valid */
         var isValid = true;
-        if(!account || !password) isValid = false;
+        if(!account || !password || !name || !birthday || !gender) isValid = false;
         if(isValid) {
             if(account.length < 5 || account.length > 15) isValid = false;
             if(password.length < 8 || password.length > 15) isValid = false;
@@ -73,7 +77,13 @@ export default class UserAPI {
             return handleError("non-valid input", res);
         } 
 
-        const newUser = new User({account: account, password: password});
+        const newUser = new User({
+	    name: name, 
+	    account: account, 
+	    password: password,
+	    birthday: birthday,
+	    gender: gender	
+	});
         newUser.save((err, user) => {
             if(err) {
                 return handleError(err, res);

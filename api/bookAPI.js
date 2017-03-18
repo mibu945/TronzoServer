@@ -20,17 +20,31 @@ function handleSuccess(res) {
    res.json({suc: "ok"});
 }
 
+function findBook(condition, cb) {
+    Book.find(condition).sort('browserNum')
+	.limit(100)
+        .populate("author", "name")
+        .populate("comments.author", "name")
+        .populate("likeUsers", "name")
+        .populate("sections", "title")
+        .exec(cb);
+}
 
 export default class BookAPI {
+    static postImage(req, res) {
+    	console.log(req.image);
+	return handleSuccess(res);
+    }
+
+    static getBooksDefault(req, res) {
+ 	findBook(null, (err, books) => {
+            if(err || !books) return handleError(err, res);
+            res.json(books);
+        });
+    }
     static getBooksByTitle(req, res) {
-        console.log("getTitle");
         const title = req.query.title;
-        Book.find({title: title })
-        .populate("userID", "account")
-        .populate("comments.userID", "account")
-        .populate("likeUsers", "account")
-        .populate("contents", "title")
-        .exec((err, books) => {
+ 	findBook({title: title }, (err, books) => {
             if(err || !books) return handleError(err, res);
             res.json(books);
         });
@@ -41,12 +55,7 @@ export default class BookAPI {
         if(!userID){
             return handleError("non-valid input", res);
         }
-        Book.find({userID: userID })
-        .populate("userID", "account")
-        .populate("comments.userID", "account")
-        .populate("likeUsers", "account")
-        .populate("contents", "title")
-        .exec((err, books) => {
+	findBook({author: userID }, (err, books) => {
             if(err || !books) return handleError(err, res);
             res.json(books);
         });
@@ -66,17 +75,17 @@ export default class BookAPI {
     }
 
     //取得book's第n章內容
-    static getBookContent(req, res) {
+    static getBookSection(req, res) {
         const bookID = req.query.bookID;
         const num = req.query.num;
         if(!bookID || !num){
             return handleError("non-valid input", res);
         }
         Book.findOne({_id: bookID}, (err, book) => {
-            if(err || !book || num > book.contents.size){
+            if(err || !book || num > book.sections.length){
                 return handleError(err, res);
             }
-            Article.findOne({_id: book.content[num - 1]}, (err, article) => {
+            Article.findOne({_id: book.sections[num - 1]}, (err, article) => {
                 if(err || !article) {
                     return handleError(err, res);
                 }
@@ -91,17 +100,18 @@ export default class BookAPI {
         const title = req.body.title;
         const type = req.body.type;
         const description = req.body.description;
-        
-        if(!title || !type || !description) {
+        const cover = req.body.cover;
+	console.log(req.body);
+        if(!title || !type || !cover) {
             return handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
                return handleError(err, res);
             }
-            Book.create({userID: token._id,
+            Book.create({author: token._id,
                 title: title,
-                type: type,
+                bookType: type,
                 description: description
             }, (err, book) => {
                 if(err) {
@@ -123,7 +133,7 @@ export default class BookAPI {
             if(err) {
                return handleError(err, res);
             }
-            Book.update({_id: bookID}, {$push: {comments: {userID: token._id, content: comment}}}, (err) => {
+            Book.update({_id: bookID}, {$push: {comments: {author: token._id, content: comment}}}, (err) => {
                 if(err){
                     return handleError(err, res);
                 }
@@ -132,7 +142,7 @@ export default class BookAPI {
         });
     }
     //發表新篇章
-    static postBookContent(req, res) {
+    static postBookSection(req, res) {
         const bookID = req.body.bookID;
         const title = req.body.contentTitle;
         
@@ -143,17 +153,17 @@ export default class BookAPI {
             if(err) {
                return handleError(err, res);
             }
-            Book.findOne({_id: bookID, userID: token._id}, (err, book) => {
+            Book.findOne({_id: bookID, author: token._id}, (err, book) => {
                 if(!book || err){
                     return handleError(err, res);
                 }
-                Article.create({title: title, content: ""}, (err, article) => {
+                Article.create({title: title}, (err, article) => {
                     if(err || !article){
                         return handleError(err, res);
                     }
                     console.log("create suc");
                     Book.update({_id: bookID}, 
-                    {$addToSet: {contents: article._id}}, (err) => {
+                    {$addToSet: {sections: article._id}}, (err) => {
                         if(err) {
                             return handleError(err, res);
                         }
@@ -180,8 +190,8 @@ export default class BookAPI {
             if(err) {
                return handleError(err, res);
             }
-            Book.update({_id: bookID, UserID: token._id},  {$set: {
-            title: title, type: type, content: content
+            Book.update({_id: bookID, author: token._id},  {$set: {
+            title: title, type: type, description: description
             }}, (err) => {
                 if(err) {
                     return handleError(err, res);
@@ -192,25 +202,25 @@ export default class BookAPI {
     }
 
     //更新章節
-    static putBookContent(req, res) {
-        const contentID = req.body.contentID;
+    static putBookSection(req, res) {
+        const sectionID = req.body.sectionID;
         const title = req.body.title;
-        const content = req.body.content;
+        const content = req.body.section;
         
-        if(!contentID || !content || !title) {
+        if(!sectionID || !section || !title) {
             return handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
                return handleError(err, res);
             }
-            Book.findOne({userID: token._id, content: {$in: contentID}}, 
+            Book.findOne({userID: token._id, sections: {$in: sectionID}}, 
             (err, book) => {
                 if(err || !book) {
                     return handleError(err, res);;
                 }
                 //const b = new Buffer(content);
-                Article.update({_id: contentID}, {$set: {title: title, content}}, (err, article) => {
+                Article.update({_id: sectionID}, {$set: {title: title, content}}, (err, article) => {
                     if(err) {
                         return handleError(err, res);;
                     }
@@ -241,11 +251,11 @@ export default class BookAPI {
     }
 
     //刪除某章節
-    static deleteBookContent(req, res) {
-        const contentID = req.body.contentID;
-        if(!contentID) {
+    static deleteBookSection(req, res) {
+        const sectionID = req.body.sectionID;
+        if(!sectionID) {
             return handleError("non-valid input", res);
-        }
+        }/*
         Auth.auth(req, (err, token) => {
             if(err) {
                return handleError(err, res);
@@ -258,6 +268,6 @@ export default class BookAPI {
                     return handleSuccess(res);
                 });
             });
-        });
+        });*/
     }
 }

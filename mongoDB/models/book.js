@@ -2,15 +2,19 @@ var mongoose = require('mongoose');
 
 var bookSchema = new mongoose.Schema({
     //owner data  
-    userID: {
+    author: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "UserModel"
     },
     title: {type: String, require: true},
-    cover: {type: Buffer},
-    type: {type: String, require: true},
+    cover: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "ImageModel"
+    },
+
+    bookType: {type: String, require: true},
     description: {type: String, require: true},
-    contents: [{
+    sections: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: "ArticleModel"
     }],
@@ -21,13 +25,13 @@ var bookSchema = new mongoose.Schema({
         ref: "UserModel"
     }],
     comments: [{
-        userID: {
+        author: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "UserModel"
         },
         content: {type: String, require: true}
     }],
-    browserNum: {type: Number, min: 0, default: 0},
+    readCnt: {type: Number, min: 0, default: 0},
     // meta
     createTime: {type: Date, default: Date.now},
     updateTime: {type: Date, default: Date.now},
