@@ -1,5 +1,7 @@
 import User from '../mongoDB/models/user';
+import Image from '../mongoDB/models/image';
 import Auth from './auth';
+import Fs from 'fs';
 
 function handleError(err, res) {
     console.log(err + " in UserAPI");
@@ -15,7 +17,7 @@ function handleError(err, res) {
 }
 
 function handleSuccess(res) {
-   res.json({suc: "ok"});
+    res.json({suc: "ok"});
 }
 
 export default class UserAPI {
@@ -50,7 +52,7 @@ export default class UserAPI {
             }
             res.json({
                 _id: user._id,
-		name: user.name,
+		        name: user.name,
                 account: user.account,
                 describe: user.describe,
                 follows: user.follows
@@ -60,11 +62,11 @@ export default class UserAPI {
 
     //註冊新用戶
     static postUser(req, res){
-	const name = req.body.name;
+	    const name = req.body.name;
         const account = req.body.account;
         const password = req.body.password;
-	const birthday = req.body.birthday;
-	const gender = req.body.gender;
+	    const birthday = req.body.birthday;
+	    const gender = req.body.gender;
 
         /* Check the inputs is valid */
         var isValid = true;
@@ -78,12 +80,12 @@ export default class UserAPI {
         } 
 
         const newUser = new User({
-	    name: name, 
-	    account: account, 
-	    password: password,
-	    birthday: birthday,
-	    gender: gender	
-	});
+	        name: name, 
+	        account: account, 
+	        password: password,
+	        birthday: birthday,
+	        gender: gender	
+	    });
         newUser.save((err, user) => {
             if(err) {
                 return handleError(err, res);
@@ -111,6 +113,40 @@ export default class UserAPI {
                 return handleSuccess(res);
             });
         }); 
+    }
+
+    static putUserProfilePic(req, res) {
+        //Updated data
+        const pic = req.files.profilePic;
+	    console.log(pic.size);
+	    if(!pic) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+            User.findOne({_id: token._id}, "profilePic", (err, user) => {
+                if(err || !user){
+                    return handleError(err, res);
+                }
+                const data = Fs.readFileSync(pic.path);
+	            Image.create({data: data}, (err, pic2) => {
+                    if(err) {
+                        return handleError(err, res);
+                    }
+                    if(user.profilePic){
+                        Image.remove({_id: user.profilePic});
+                    }
+                    User.update({_id: token._id}, {$set: {profilePic: pic2._id}}, (err) => {
+                        if(err) {
+                            return handleError(err, res);
+                        }
+                        return handleSuccess(res);
+                    });
+                }); 
+            });
+	    });
     }
 
     //追隨其他user
@@ -153,39 +189,6 @@ export default class UserAPI {
     }
 
     //收藏某book
-    static putCollectBook(req, res) {
-        const bookID = req.body.bookID;
-        if(!bookID) {
-            return handleError("non-valid input", res);
-        }
-        Auth.auth(req, (err, token) => {
-            if(err) {
-               return handleError(err, res);
-            }
-            User.update({_id: token._id}, {$addToSet: {collections: bookID}}, (err) => {
-                if(err) {
-                    return handleError(err, res);
-                }
-                return handleSuccess(res);
-            });        
-        });
-    }
-    //取消收藏
-    static putCancelCollectBook(req, res){
-        const bookID = req.body.bookID;
-        if(!bookID) {
-            return handleError("non-valid input", res);
-        }
-        Auth.auth(req, (err, token) => {
-            if(err) {
-               return handleError(err, res);
-            }
-            User.update({_id: token._id}, {$pull: {collections: bookID}}, (err) => {
-                if(err) {
-                    return handleError(err, res);
-                }
-                return handleSuccess(res);
-            });        
-        });
-    }
+    
+
 }

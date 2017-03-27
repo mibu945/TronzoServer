@@ -7,4 +7,4 @@ var imageSchema = new mongoose.Schema({
     timestamps: { createdAt: 'createTime'}
 });
 
-module.exports = mongoose.model('ImageModel', inageSchema);
+module.exports = mongoose.model('ImageModel', imageSchema);

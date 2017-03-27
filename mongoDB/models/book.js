@@ -24,6 +24,10 @@ var bookSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "UserModel"
     }],
+    storeUsers: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "UserModel"
+    }],
     comments: [{
         author: {
             type: mongoose.Schema.Types.ObjectId,

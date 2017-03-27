@@ -9,7 +9,7 @@ var userSchema = new mongoose.Schema({
     password: { type: String, require: true},   
     description: String,
     profilePic: String,
-    collections: [{
+    stores: [{
         type: mongoose.Schema.Types.ObjectId,
         unique: true,
         ref: 'BookModel'

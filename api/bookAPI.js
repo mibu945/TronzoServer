@@ -1,7 +1,10 @@
 import User from '../mongoDB/models/user';
 import Book from '../mongoDB/models/book';
 import Article from '../mongoDB/models/article';
+import Image from '../mongoDB/models/image';
 import Auth from './auth';
+import Fs from 'fs';
+import Ip from 'public-ip';
 
 function handleError(err, res) {
     console.log(err + " in BookAPI");
@@ -20,14 +23,48 @@ function handleSuccess(res) {
    res.json({suc: "ok"});
 }
 
-function findBook(condition, cb) {
+function findBook(req, condition, cb) {
     Book.find(condition).sort('browserNum')
 	.limit(100)
-        .populate("author", "name")
-        .populate("comments.author", "name")
-        .populate("likeUsers", "name")
-        .populate("sections", "title")
-        .exec(cb);
+    .populate("author", "name profilePic")
+    .populate("sections", "title")
+    .exec((err, books) => {
+	    if(err || !books) {
+	        cb(err, books);
+	    } else {
+	        Ip.v4().then(ipv4 => {
+		        var tmp = JSON.parse(JSON.stringify(books));
+                Auth.auth(req, (err2, token) => {
+                    function isExist(user){
+                        return user === token._id;
+                    }
+                    function mapFunction(book) {
+                        if(book.cover != null) {
+                            book.cover = "http://" + ipv4 + ":3000/get/image?id=" + book.cover;
+                        }
+                        if(book.author.profilePic != null) {
+                            book.author.profilePic = "http://" + ipv4 + ":3000/get/image?id=" + book.author.profilePic;
+                        }
+                        book.likes = book.likeUsers.length;
+                        book.stores = book.storeUsers.length;
+                        if(book.likeUsers.find(isExist) != null) {
+                            book.isLike = true;
+                        } else {
+                            book.isLike = false;
+                        }
+
+                        if(book.storeUsers.find(isExist) != null) {
+                            book.isStore = true;
+                        } else {
+                            book.isStore = false;
+                        }
+                        return book;
+                    }
+                    return cb(err, tmp.map(mapFunction));
+	            });
+            });
+        }		
+	});
 }
 
 export default class BookAPI {
@@ -37,14 +74,14 @@ export default class BookAPI {
     }
 
     static getBooksDefault(req, res) {
- 	findBook(null, (err, books) => {
-            if(err || !books) return handleError(err, res);
+ 	findBook(req, null, (err, books) => {
+        if(err || !books) return handleError(err, res);
             res.json(books);
         });
     }
     static getBooksByTitle(req, res) {
         const title = req.query.title;
- 	findBook({title: title }, (err, books) => {
+ 	    findBook(req, {title: title }, (err, books) => {
             if(err || !books) return handleError(err, res);
             res.json(books);
         });
@@ -55,7 +92,7 @@ export default class BookAPI {
         if(!userID){
             return handleError("non-valid input", res);
         }
-	findBook({author: userID }, (err, books) => {
+	    findBook(req, {author: userID }, (err, books) => {
             if(err || !books) return handleError(err, res);
             res.json(books);
         });
@@ -66,7 +103,7 @@ export default class BookAPI {
         if(!bookID){
             return handleError("non-valid input", res);
         }
-        Book.findOne({_id: bookID}, (err, book) => {
+        findBook(req, {_id: bookID}, (err, book) => {
             if(err || !book){
                 return handleError(err, res);
             }
@@ -100,25 +137,33 @@ export default class BookAPI {
         const title = req.body.title;
         const type = req.body.type;
         const description = req.body.description;
-        const cover = req.body.cover;
-	console.log(req.body);
-        if(!title || !type || !cover) {
+        const cover = req.files.cover;
+	    console.log(cover.size);
+        //console.log();
+	    if(!title || !type || !cover) {
             return handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
                return handleError(err, res);
             }
-            Book.create({author: token._id,
-                title: title,
-                bookType: type,
-                description: description
-            }, (err, book) => {
+	        const data = Fs.readFileSync(cover.path);
+	        Image.create({data: data}, (err, cover) => {
                 if(err) {
                     return handleError(err, res);
-                }
-                res.json({title: book.title, description: book.description});
-            });
+                }    
+                Book.create({author: token._id,
+                    title: title,
+                    bookType: type,
+                    description: description,
+                    cover: cover._id
+                }, (err, book) => {
+                    if(err) {
+                        return handleError(err, res);
+                    }
+                    handleSuccess(res);
+                });
+            }); 
         });
      }
     //在書下留言
@@ -227,11 +272,93 @@ export default class BookAPI {
                     return handleSuccess(res);
                 });
             });
-
         });
     }
 
-    //刪除整本書
+    static putLikeBook(req, res) {
+        const bookID = req.body.bookID;
+        
+        if(!bookID) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+            Book.update({_id: bookID}, {$addToSet: {likeUsers: token._id}}, (err) => {
+                if(err) {
+                    return handleError(err, res);
+                }
+                return handleSuccess(res);
+            });  
+        });
+
+    }
+
+    static putCancelLikeBook(req, res) {
+        const bookID = req.body.bookID;
+        
+        if(!bookID) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+            Book.update({_id: bookID}, {$pull: {likeUsers: token._id}}, (err) => {
+                if(err) {
+                    return handleError(err, res);
+                }
+                return handleSuccess(res);
+            });  
+        });
+    }
+    static putStoreBook(req, res) {
+        const bookID = req.body.bookID;
+        if(!bookID) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+            User.update({_id: token._id}, {$addToSet: {stores: bookID}}, (err) => {
+                if(err) {
+                    return handleError(err, res);
+                }
+                Book.update({_id: bookID}, {$addToSet: {storeUsers: token._id}}, (err) => {
+                    if(err) {
+                        return handleError(err, res);
+                    }
+                    return handleSuccess(res);
+                }); 
+            });        
+        });
+    }
+
+    static putCancelStoreBook(req, res) {
+        const bookID = req.body.bookID;
+        if(!bookID) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+            User.update({_id: token._id}, {$pull: {stores: bookID}}, (err) => {
+                if(err) {
+                    return handleError(err, res);
+                }
+                Book.update({_id: bookID}, {$pull: {storeUsers: token._id}}, (err) => {
+                    if(err) {
+                        return handleError(err, res);
+                    }
+                    return handleSuccess(res);
+                }); 
+            });        
+        });
+    }
+
     static deleteBook(req, res) {
         const bookID = req.body.bookID;
 

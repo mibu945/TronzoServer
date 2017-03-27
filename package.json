@@ -19,7 +19,8 @@
     "forever": "^0.15.3",
     "jwt-simple": "^0.5.1",
     "mongoose": "^4.7.6",
-    "nodemon": "^1.11.0"
+    "nodemon": "^1.11.0",
+    "public-ip": "^2.3.3"
   },
   "scripts": {
     "start": "nodemon server.js --exec babel-node",
