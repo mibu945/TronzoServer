@@ -1,8 +1,10 @@
+import Book from '../mongoDB/models/book';
 import User from '../mongoDB/models/user';
 import Image from '../mongoDB/models/image';
 import Auth from './auth';
 import Fs from 'fs';
-
+import Ip from 'public-ip';
+import Async from 'async';
 function handleError(err, res) {
     console.log(err + " in UserAPI");
     if(!err){
@@ -20,47 +22,128 @@ function handleSuccess(res) {
     res.json({suc: "ok"});
 }
 
+function findUser(userID, cb) {
+    Async.parallel([
+        function(cb) {
+            User.findOne({_id: userID}, cb);
+        },
+        function(cb) {
+            Ip.v4().then((ipv4) => {cb(null, ipv4)});
+        },
+        function(cb) {
+            Book
+            .find({author: userID})
+            .populate("sections", "wordCnt")
+            .exec(cb);
+        },
+        function(cb) {
+            User.find({follows: {$in: [userID]}}, cb);
+        }
+    ], (err, res) => {
+        if(err) {
+            return cb(err, null);
+        }
+        const user = res[0];
+        const ip = res[1];
+        const books = res[2];
+        const followUsers = res[3];
+        var resUser = {};
+        resUser._id = user._id;
+        resUser.name = user.name;
+        resUser.description = user.description;
+        if(user.profilePic) {
+            resUser.profilePic = "http://" + ip + ":3000/get/image?id=" + user.profilePic;
+        }
+        resUser.rank = user.rank;
+        resUser.books = books.length;
+        resUser.likes = books.reduce((sum, book) => {
+            sum += book.likeUsers.length;
+            return sum;
+        }, 0);
+        resUser.stores = books.reduce((sum, book) => {
+            sum += book.storeUsers.length;
+            return sum;
+        }, 0);
+
+        resUser.readNum = books.reduce((sum, book) => {
+            sum += book.readCnt;
+            return sum;
+        }, 0);
+        resUser.wordCnt = books.reduce((sum, book) => {
+            sum += book.sections.reduce((sum2, section) => {
+                sum2 += section.wordCnt;
+                return sum2;
+            }, 0);
+            return sum;
+        }, 0);
+        resUser.follows = followUsers.length;
+        
+        cb(null, resUser);
+    });
+}
+
+function findUserBasic(condition, cb) {
+    User.findOne(condition, (err, user) => {
+	    if(err || !user) {
+	        cb(err, user);
+	    } else {
+	        Ip.v4().then(ipv4 => {
+                var tmp = {};
+                tmp.name = user.name;
+                tmp.description = user.description;
+                if(user.profilePic) {
+                    tmp.profilePic = "http://" + ipv4 + ":3000/get/image?id=" + user.profilePic;
+                }
+                tmp.rank = user.rank;
+                return cb(err, tmp);
+            });
+        }		
+	});
+}
+
 export default class UserAPI {
     
-    //取得基本資訊
+    static getUser(req, res) {
+        Auth.auth(req, (err, token) => {
+            if(err) {
+                return handleError(err, res);
+            }
+            findUser(token._id, (err, user) => {
+                if(err) {
+                    return handleError(err, res);
+                }
+                res.json(user);  
+            });
+        });
+    }
+    /*
     static getUserByAccount(req, res) {
         const account = req.query.account;
         if (!account) {
             return handleError("non-valid input", res);
         }
-        User.findOne({account: account}, (err, user) => {
-            if(err || !user){
+        findUser({account: account}, (err, user) => {
+            if(err) {
                 return handleError(err, res);
             }
-            res.json({
-                _id: user._id,
-                account: user.account,
-                describe: user.describe,
-                follows: user.follows
-            });
+            res.json(user);  
         });
-    }
-    //取得基本資訊
+    }*/
+
     static getUserByID(req, res) {
         const userID = req.query.userID;
         if (!userID) {
             return handleError("non-valid input", res);
         }
-        User.findOne({_id: userID}, (err, user) => {
-            if(err || !user){
-                return handleError("input is null", res);
+        findUser(userID, (err, user) => {
+            if(err) {
+                return handleError(err, res);
             }
-            res.json({
-                _id: user._id,
-		        name: user.name,
-                account: user.account,
-                describe: user.describe,
-                follows: user.follows
-            });
+            res.json(user);  
         });
     }
 
-    //註冊新用戶
+    //register
     static postUser(req, res){
 	    const name = req.body.name;
         const account = req.body.account;
@@ -90,7 +173,7 @@ export default class UserAPI {
             if(err) {
                 return handleError(err, res);
             } 
-            return handleSuccess(res);
+            return handleSuccess(user._id);
         });
     }   
 
@@ -116,9 +199,7 @@ export default class UserAPI {
     }
 
     static putUserProfilePic(req, res) {
-        //Updated data
         const pic = req.files.profilePic;
-	    console.log(pic.size);
 	    if(!pic) {
             return handleError("non-valid input", res);
         }
@@ -157,7 +238,7 @@ export default class UserAPI {
             return handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
-            if(err) {
+            if(err || userID == token._id) {
                return handleError(err, res);
             }
             User.update({_id: token._id}, {$addToSet: {follows: userID}}, (err) => {
@@ -187,8 +268,4 @@ export default class UserAPI {
             });        
         });
     }
-
-    //收藏某book
-    
-
 }

@@ -2,8 +2,9 @@ var mongoose = require('mongoose');
 
 var articleSchema = new mongoose.Schema({
 
-    title: {type: String, require: true},
-    content: {type: Buffer},
+    title: {type: String},
+    content: {type: String},
+    wordCnt: {type: Number, default: 0},
 // meta
     createTime: {type: Date, default: Date.now},
     updateTime: {type: Date, default: Date.now},

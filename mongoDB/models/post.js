@@ -1,12 +1,20 @@
 var mongoose = require('mongoose');
 
 var postSchema = new mongoose.Schema({
-    userID: {
+    author: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'UserModel'
+        ref: "UserModel"
     },
-    content: {type: String, require: true},
-// meta
+    book: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "BookModel"
+    },
+    content: {
+        type: String,
+        require: true
+    },
+
+    // meta
     createTime: {type: Date, default: Date.now},
     updateTime: {type: Date, default: Date.now}
 }, {
