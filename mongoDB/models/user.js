@@ -1,8 +1,7 @@
 var mongoose = require('mongoose');
 
 var userSchema = new mongoose.Schema({
-    //user uploading data
-    name: String,
+    name: { type: String, unique: true, require: true},
     birthday: String,
     gender: String,
     account: { type: String, unique: true, require: true},

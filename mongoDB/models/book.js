@@ -37,6 +37,7 @@ var bookSchema = new mongoose.Schema({
     }],
     readCnt: {type: Number, min: 0, default: 0},
     // meta
+    point: {type: Number},
     createTime: {type: Date, default: Date.now},
     updateTime: {type: Date, default: Date.now},
 }, {
