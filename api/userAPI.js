@@ -18,8 +18,9 @@ function handleError(err, res) {
     }
 }
 
-function handleSuccess(res) {
-    res.json({suc: "ok"});
+function handleSuccess(suc, res) {
+    suc.suc = "ok";
+    res.json(suc);
 }
 
 function findUser(userID, cb) {
@@ -161,19 +162,17 @@ export default class UserAPI {
         if(!isValid) {
             return handleError("non-valid input", res);
         } 
-
-        const newUser = new User({
+        User.create({
 	        name: name, 
 	        account: account, 
 	        password: password,
 	        birthday: birthday,
 	        gender: gender	
-	    });
-        newUser.save((err, user) => {
+	    }, (err, user) => {
             if(err) {
                 return handleError(err, res);
             } 
-            return handleSuccess(user._id);
+            return handleSuccess({_id: user._id}, res);
         });
     }   
 
@@ -193,7 +192,7 @@ export default class UserAPI {
                 if(err) {
                     return handleError(err, res);
                 }
-                return handleSuccess(res);
+                return handleSuccess({}, res);
             });
         }); 
     }
@@ -223,7 +222,7 @@ export default class UserAPI {
                         if(err) {
                             return handleError(err, res);
                         }
-                        return handleSuccess(res);
+                        return handleSuccess({}, res);
                     });
                 }); 
             });
@@ -245,7 +244,7 @@ export default class UserAPI {
                 if(err) {
                     return handleError(err, res);
                 }
-                return handleSuccess(res);
+                return handleSuccess({}, res);
             });        
         });
     }
@@ -264,7 +263,7 @@ export default class UserAPI {
                 if(err) {
                     return handleError(err, res);
                 }
-                return handleSuccess(res);
+                return handleSuccess({}, res);
             });        
         });
     }

@@ -25,13 +25,13 @@ function handleSuccess(suc, res) {
     res.json(suc);
 }
 
-function findBook(req, condition, cb) {
+function findBook(req, condition, cb, sort = {updateTime: -1}, limit = 100) {
     
     Async.parallel([
         function(cb) {
             Book.find(condition)
-            .sort({updateTime: -1})
-	        .limit(100)
+            .sort(sort)
+	        .limit(limit)
             .populate("author", "name profilePic")
             .populate("sections", "title")
             .exec(cb);
@@ -79,6 +79,68 @@ export default class BookAPI {
             res.json(books);
         });
     }
+
+    static getRecommendedBooks(req, res) {
+        Book.aggregate([
+            {
+                $lookup: {
+                    from: "usermodels",
+                    localField: "author",
+                    foreignField: "_id",
+                    as: "author"
+                }
+            }, {   
+                $project: {
+                    author: {
+                        _id: true,
+                        name: true,
+                        profilePic: true 
+                    },
+                    title: true,
+                    cover: true,
+                    bookType: true,
+                    description: true,
+                    sections: true,
+                    updateTime: true,
+                    createTime: true,
+                    readCnt: true,
+                    stores: {"$size": { "$ifNull": [ "$storeUsers", [] ] }},
+                    likes: {"$size": { "$ifNull": [ "$likeUsers", [] ] }},
+                    weight: {
+                        $add: [
+                            {$multiply: [300, {"$size": { "$ifNull": [ "$storeUsers", [] ] }}]},
+                            {$multiply: [35, {"$size": { "$ifNull": [ "$likeUsers", [] ] }}]},
+                            "$readCnt"
+                        ]
+                    }
+                }
+            }, {
+                $sort: {weight: -1}
+            }, 
+        ], (err, books) => {
+            if(err || !books) return handleError(err, res);
+            Book.populate(books, {path: "sections", select: "title"}, (err, books) => {
+                if(err || !books) return handleError(err, res);
+                res.json(books);
+            })
+        });
+    }
+
+    static getInterestedBooks(req, res) {
+        Auth.auth(req, (err, token) => {
+            if(err || !token) return handleError(err, res);
+            User.findOne({_id: token._id}, "stores follows", (err, user) => {
+                if(err || !user) return handleError(err, res);
+                const condition = {$or: [{author: {$in: user.follows}}, {_id: {$in: user.stores}}]};
+                findBook(req, condition, (err, books) => {
+                    if(err || !books) return handleError(err, res);
+                    res.json(books);
+                });         
+            });
+        });
+    }
+
+
     static getBooksByTitle(req, res) {
         const title = req.query.title;
         const search = new RegExp(title, "i");
@@ -99,7 +161,7 @@ export default class BookAPI {
         });
     }
     //取得book's基本資料
-    static getBook(req, res) {
+    static getBookByID(req, res) {
         const bookID = req.query.bookID;
         if(!bookID){
             return handleError("non-valid input", res);
@@ -149,7 +211,7 @@ export default class BookAPI {
                     title: title,
                     bookType: type,
                     description: description,
-                    cover: cover._id
+                    cover: cover._id,
                 }, (err, book) => {
                     if(err) {
                         return handleError(err, res);
@@ -231,7 +293,6 @@ export default class BookAPI {
             if(title) book.title = title;
             if(type) book.type = type;
             if(description) book.description = description;
-
             Book.update({_id: bookID, author: token._id},  {$set: book}, (err) => {
                 if(err) {
                     return handleError(err, res);
@@ -321,7 +382,8 @@ export default class BookAPI {
                     User.update({_id: token._id}, {$addToSet: {stores: bookID}}, cb);
                 },
                 function(cb){
-                    Book.update({_id: bookID}, {$addToSet: {storeUsers: token._id}}, cb);       }
+                    Book.update({_id: bookID}, {$addToSet: {storeUsers: token._id}}, cb);       
+                }
             ], (err) => {
                 if(err) {
                     return handleError(err, res);
