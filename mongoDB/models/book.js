@@ -28,6 +28,10 @@ var bookSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "UserModel"
     }],
+    shareUsers: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "UserModel"
+    }],
     comments: [{
         author: {
             type: mongoose.Schema.Types.ObjectId,
@@ -35,9 +39,13 @@ var bookSchema = new mongoose.Schema({
         },
         content: {type: String, require: true}
     }],
+    //meta
+    point: {type: Number, min: 0, default: 0},
     readCnt: {type: Number, min: 0, default: 0},
-    // meta
-    point: {type: Number},
+    readMeta: [{
+        ip: {type: String, require: true},
+        time: {type: Date, require: true}
+    }],
     createTime: {type: Date, default: Date.now},
     updateTime: {type: Date, default: Date.now},
 }, {

@@ -3,6 +3,12 @@ import User from '../mongoDB/models/user';
 import Book from '../mongoDB/models/book';
 import Auth from './auth';
 import Ip from 'public-ip';
+import Async from 'async';
+
+const SHAREWEIGHT = 300;
+const COMMENTWEIGHT = 30;
+const LIKEWEIGHT = 15;
+
 function handleError(err, res) {
     console.log(err + " in PostAPI");
     if(!err){
@@ -15,47 +21,115 @@ function handleError(err, res) {
         res.status(400).json({error: err});
     }
 }
-
-function handleSuccess(res) {
-   res.json({suc: "ok"});
+function handleSuccess(suc, res) {
+    suc.suc = "OK";
+    res.json(suc);
 }
 
-function findPost(req, condition, cb) {
-    Post.find(condition)
-	.limit(100)
+function _findPost(condition, cb, limit = 100, sort = {createTime: -1}) {
+    return Post
+    .find(condition)
+    .sort(sort)
+    .limit(limit)
     .populate("author", "name profilePic")
-    .populate("book", "cover")
-    .exec((err, posts) => {
-	    if(err || !posts) {
-	        cb(err, posts);
-	    } else {
-	        Ip.v4().then(ipv4 => {
-                var tmp = JSON.parse(JSON.stringify(posts));
-                function mapFunction(post) {
-                    //console.log(post);
-                    if(post.book.cover != null) {
-                        post.book.cover = "http://" + ipv4 + ":3000/get/image?id=" + post.book.cover;
-                    }
-                    if(post.author.profilePic != null) {
-                        post.author.profilePic = "http://" + ipv4 + ":3000/get/image?id=" + post.author.profilePic;
-                    }
-                    return post;
-                }
-                cb(err, tmp.map(mapFunction));
-            });
-        }		
-	});
+    .populate("comments.author", "name profilePic")
+    .populate({
+        path: "book",
+        select: "title cover description author",
+        populate: {
+            path: "author",
+            select: "name profilePic"
+        }
+    })
+    .exec(cb);
 }
+
+function _returnPosts(posts, req, cb){
+    Async.parallel([
+        function(cb) {
+            Auth.auth(req, (err, token) => {
+                if(err) return cb(null, null);
+                User.findOne({_id: token._id}, "_id", cb);
+            });
+        },
+        function(cb) {
+            Ip.v4().then((ipv4) => {cb(null, ipv4)});
+        }
+    ], (err, result) => {
+        if(err) {
+            console.log(err);
+            return cb([]);
+        }
+        const user = result[0];
+        const ip = result[1];
+        var tmp = JSON.parse(JSON.stringify(posts));
+        function isExist(tmp) {
+            if(user) return tmp == user._id;
+            return false;
+        }
+        return cb(tmp.map((post) => {
+            post.type = "post";
+            //for lookup case
+            if(post.author[0])post.author = post.author[0];
+            if(post.book[0])post.book = post.book[0];
+            if(post.book.author[0])post.book.author = post.book.author[0];
+
+            if(post.author && post.author.profilePic) {
+                post.author.profilePic = "http://" + ip + ":3000/get/image?id=" + post.author.profilePic;
+            }
+            post.comments = post.comments.map(comment => {
+                if(comment.author.profilePic){
+                    comment.author.profilePic = "http://" + ip + ":3000/get/image?id=" + comment.author.profilePic;
+                }
+                return comment;
+            });
+            if(post.book.author && post.book.author.profilePic) {
+                post.book.author.profilePic = "http://" + ip + ":3000/get/image?id=" + post.book.author.profilePic;
+            }
+            if(post.book && post.book.cover) {
+                post.book.cover = "http://" + ip + ":3000/get/image?id=" + post.book.cover;
+            }
+            post.shares = post.shareUsers ? post.shareUsers.length : 0;
+            
+            if(post.likeUsers) {
+                post.isLike = ( post.likeUsers.find(isExist) != null);
+                post.likes = post.likeUsers.length;
+            } else {
+                post.isLike = false;
+                post.likes = 0;
+            }
+
+            delete post.likeUsers;
+            delete post.shareUsers;
+
+            delete post.updateTime;
+            return post;
+        }));
+    });
+}
+
+
+
 export default class PostAPI {
+
+    static findPost(condition, cb, limit = 100, sort = {createTime: -1}) {
+        return _findPost(condition, cb, limit, sort);
+    }
+
+    static returnPosts(posts, req, cb) {
+        return _returnPosts(posts, req, cb);
+    }
     static getPostByID(req, res) {
         const postID = req.query.postID;
         
         if(!postID) {
             return handleError("non-valid input", res);
         }
-        findPost(req, {_id: postID}, (err, post) => {
-            if(err || !post) return handleError(err, res);
-            res.json(post);
+        _findPost(req, {_id: postID}, (err, post) => {
+            if(err) return handleError(err, res);
+            _returnPosts(posts, req, (posts) => {
+                res.json(posts);
+            });
         });
     }
     static getPostsByUser(req, res) {
@@ -92,6 +166,59 @@ export default class PostAPI {
             });
         });
     }
+    
+    static postPostComment(req, res) {
+        const postID = req.body.postID;
+        const content = req.body.content;
+        if(!postID || !content) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+            const comment = {author: token._id, content: content};
+            Post.findOneAndUpdate({_id: postID},  {$push: {comments: comment}}, (err, post) => {
+                if(err || !post) {
+                    return handleError(err, res);
+                }
+                Post.findOne({_id: postID}, (err, post) => {
+                    if(err || !post) return handleError(err, res);
+                    
+                    Post.update({_id: postID}, {$inc: {point: COMMENTWEIGHT}}, {strict: false}, (err) => {});
+                    return handleSuccess({_id: post.comments[post.comments.length - 1]._id}, res);
+                });
+            });
+        });
+    }
+    static deletePostComment(req, res) {
+        const commentID = req.body.commentID;
+        if(!commentID) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+            Post.findOne({"comments._id": commentID}, "_id author comments", (err, post) => {
+                if(err || !post) return handleError(err, res);
+                var index = post.comments.findIndex((comment) => {
+                    return comment._id == commentID; 
+                });
+                if(post.author != token._id && post.comments[index].author != token._id) {
+                    return handleError("You did not use its authority", res);
+                }
+                Post.update({_id: post._id}, {$pull: {comments: post.comments[index]}}, {strict: false}, (err) => {
+                    if(err) {
+                        return handleError(err, res);
+                    }
+                    Post.update({_id: post._id}, {$inc: {point: -1 * COMMENTWEIGHT}}, {strict: false}, (err) => {});
+                    return handleSuccess({}, res);
+                }); 
+            }); 
+        });
+    }
+
     static putPost(req, res) {
         const postID = req.body.postID;
         const content = req.body.content;
@@ -106,11 +233,73 @@ export default class PostAPI {
                 if(err) {
                     return handleError(err, res);
                 }
-                return handleSuccess(res);
+                return handleSuccess({}, res);
             });
         });
 
     }
+    static putLikePost(req, res) {
+        const postID = req.body.postID;
+        
+        if(!postID) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+
+            Post.update({_id: postID}, {$addToSet: {likeUsers: token._id}}, {strict: false} , (err) => {
+                if(err) {
+                    return handleError(err, res);
+                }
+                Post.update({_id: postID}, {$inc: {point: LIKEWEIGHT}}, {strict: false}, (err) => {});
+                return handleSuccess({}, res);
+            });  
+        });
+
+    }
+
+    static putCancelLikePost(req, res) {
+        const postID = req.body.postID;
+        
+        if(!postID) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+            Post.update({_id: postID}, {$pull: {likeUsers: token._id}}, {strict: false}, (err) => {
+                if(err) {
+                    return handleError(err, res);
+                }
+
+                Post.update({_id: postID}, {$inc: {point: -1 * LIKEWEIGHT}}, {strict: false}, (err) => {});
+                return handleSuccess({}, res);
+            });  
+        });
+    }
+    static putSharePost(req, res) {
+        const postID = req.body.postID;
+        if(!postID) {
+            return handleError("non-valid input", res);
+        }
+        Auth.auth(req, (err, token) => {
+            if(err) {
+               return handleError(err, res);
+            }
+            Post.findOneAndUpdate({_id: postID}, {$addToSet: {shareUsers: token._id}}, {strict: false}, (err, book) => {
+                if(err) {
+                    return handleError(err, res);
+                }
+                Post.update({_id: postID}, {$inc: {point: SHAREWEIGHT}}, {strict: false}, (err) => {});
+                return handleSuccess({}, res);
+            });  
+        });
+    }
+
+
     static deletePost(req, res) {
         const postID = req.body.postID;
         if(!postID) {
@@ -124,7 +313,7 @@ export default class PostAPI {
                 if(err) {
                     return handleError(err, res);
                 }
-                return handleSuccess(res);
+                return handleSuccess({}, res);
             });
         });
     }   

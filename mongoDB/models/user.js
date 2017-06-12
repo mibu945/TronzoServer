@@ -1,21 +1,37 @@
 var mongoose = require('mongoose');
 
 var userSchema = new mongoose.Schema({
-    name: { type: String, unique: true, require: true},
+    fbID: {type: String},
+    name: {type: String, require: true},
     birthday: String,
     gender: String,
-    account: { type: String, unique: true, require: true},
-    password: { type: String, require: true},   
+    account: {type: String, unique: true},
+    password: String,   
     description: String,
     profilePic: String,
     stores: [{
         type: mongoose.Schema.Types.ObjectId,
-        unique: true,
         ref: 'BookModel'
+    }],
+    storedList: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'BookModel'
+    }],
+    bookHistorys: [{
+        book: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'BookModel'
+        }, 
+        section: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'ArticleModel'
+        },
+        sectionNum: {
+            type: Number
+        }
     }],
     follows: [{
         type: mongoose.Schema.Types.ObjectId,
-        unique: true,
         ref: 'UserModel'
     }],
     //system's data 
