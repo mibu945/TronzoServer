@@ -45,7 +45,7 @@ app.post('/get/userToken', Auth.login);
 app.post('/loginByFB', Auth.loginByFB);
 
 //User Router
-app.get('/get/user', UserAPI.getUser);
+app.get('/get/me', UserAPI.getMe);
 app.get('/get/userByID', UserAPI.getUserByID);
 app.post('/post/user', UserAPI.postUser);
 app.post('/put/user', UserAPI.putUser);
@@ -104,7 +104,9 @@ app.post('/delete/postComment', PostAPI.deletePostComment);
 app.listen(app.get('port'), () => {
   console.log(`Find the server at: http://localhost:${app.get('port')}/`); // eslint-disable-line no-console
 });
-/*
-schedule.scheduleJob("0 * * * * *", () => {
-    console.log("test");
-});*/
+
+//run at 0:0:0 every sunday
+schedule.scheduleJob("0 0 0 * * 0", () => {
+    PostAPI.resetPoint();
+    BookAPI.resetPoint();
+});

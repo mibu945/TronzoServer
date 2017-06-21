@@ -1,6 +1,7 @@
 import Book from '../mongoDB/models/book';
 import User from '../mongoDB/models/user';
 import Image from '../mongoDB/models/image';
+import Post from '../mongoDB/models/post';
 import Auth from './auth';
 import Fs from 'fs';
 import Ip from 'public-ip';
@@ -33,7 +34,7 @@ function findUser(userID, loginID, cb) {
         },
         function(cb) {
             Book
-            .find({author: userID})
+            .find({author: userID}, "likeUsers storeUsers readCnt sections")
             .populate("sections", "wordCnt")
             .exec(cb);
         },
@@ -43,6 +44,9 @@ function findUser(userID, loginID, cb) {
         function(cb){
             if(loginID)User.findOne({_id: loginID}, "follows", cb);
             else cb(null, null);
+        },
+        function(cb){
+            Post.find({author: userID}, "likeUsers", cb);
         }
     ], (err, res) => {
         if(err) {
@@ -52,6 +56,7 @@ function findUser(userID, loginID, cb) {
         const ip = res[1];
         const books = res[2];
         const followNum = res[3].length;
+        const posts = res[5];
         var LoginUserFollowUsers;
         if(res[4])LoginUserFollowUsers = res[4].follows;
         else LoginUserFollowUsers = [];
@@ -90,7 +95,12 @@ function findUser(userID, loginID, cb) {
         if(index > -1) {
             resUser.isFollow = true;
         }
-        //resUser.bookHistorys = user.bookHistorys;
+        var likePostCnt = posts.reduce((cnt, post) => {
+            return cnt + (post.likeUsers ? post.likeUsers.length : 0);
+        }, 0);
+        resUser.readerExp = user.readBookCnt * 300 + followNum * 10 + likePostCnt * 5;
+        resUser.authorExp = books.length + followNum * 5 + resUser.likes * 2 + resUser.stores;
+        resUser.readBookCnt = user.readBookCnt;
         cb(null, resUser);
     });
 }
@@ -115,7 +125,7 @@ function dataURItoBlob(dataURI, type) {
 }
 export default class UserAPI {
     
-    static getUser(req, res) {
+    static getMe(req, res) {
         Auth.auth(req, (err, token) => {
             if(err) {
                 return handleError(err, res);

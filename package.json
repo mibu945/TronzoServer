@@ -19,9 +19,8 @@
     "express": "4.13.3",
     "fb": "^2.0.0",
     "forever": "^0.15.3",
-    "image-downloader": "^3.2.1",
     "jwt-simple": "^0.5.1",
-    "mongoose": "^4.7.6",
+    "mongoose": "^4.9.0",
     "node-schedule": "^1.2.3",
     "nodemon": "^1.11.0",
     "public-ip": "^2.3.3"

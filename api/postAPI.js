@@ -112,6 +112,9 @@ function _returnPosts(posts, req, cb){
 
 export default class PostAPI {
 
+    static resetPoint() {
+        Point.update({}, {point: 0}, (err) => {});
+    }
     static findPost(condition, cb, limit = 100, sort = {createTime: -1}) {
         return _findPost(condition, cb, limit, sort);
     }

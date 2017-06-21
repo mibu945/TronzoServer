@@ -37,6 +37,15 @@ function handleSuccess(suc, res) {
     res.json(suc);
 }
 
+function mergeBooksAndPosts2(books, posts, cb){
+    var merge = books.concat(posts);
+    merge = merge.sort((a, b)=>{
+        var time1 = (a.type == "book" ? a.updateTime : a.createTime);
+        var time2 = (b.type == "book" ? b.updateTime : b.createTime);
+        return new Date(time2) - new Date(time1);
+    });
+    cb(merge);
+}
 function mergeBooksAndPosts(books, posts, cb){
     var merge = [];
     var i = 0;
@@ -64,7 +73,7 @@ function mergeBooksAndPosts(books, posts, cb){
     return cb(merge);
 }
 
-function returnBooks(books, req, cb){
+function _returnBooks(books, req, cb){
     Async.parallel([
         function(cb) {
             Auth.auth(req, (err, token) => {
@@ -117,7 +126,7 @@ function returnBooks(books, req, cb){
                 const his = user.bookHistorys.find((item) => {return item.book == book._id});
                 if(his) book.lastReadSection = his.sectionNum;
             }
-            delete book.updateTime;
+            //delete book.updateTime;
             delete book.likeUsers;
             delete book.storeUsers;
             delete book.shareUsers;
@@ -127,7 +136,7 @@ function returnBooks(books, req, cb){
 }
 
 
-function findBook(condition, cb, limit = 100, sort = {point : -1}) {
+function _findBook(condition, cb, limit = 100, sort = {point : -1}) {
     const find = [
         {
             $match: condition
@@ -146,7 +155,8 @@ function findBook(condition, cb, limit = 100, sort = {point : -1}) {
                 storeUsers: true,
                 likeUsers: true,
                 shareUsers: true,
-                point: true
+                point: true,
+                updateTime: true
             }
         }, {
             $sort: sort
@@ -162,31 +172,39 @@ function findBook(condition, cb, limit = 100, sort = {point : -1}) {
         })
     });     
 }
-
+function _updateTime(bookID) {
+    Book.update({_id: bookID}, {$set: {updateTime: new Date()}}, (err)=>{});
+}
 
 export default class BookAPI {
-
-    static _findBook(condition, cb, limit = 100, sort = {weight : -1}) {
-        return findBook(condition, cb, limit, sort);
+    
+    static resetPoint() {
+        Book.update({}, {point: 0}, (err) => {});
+    }
+    static updateTime(bookID) {
+        _updateTime(bookID);
+    }
+    static findBook(condition, cb, limit = 100, sort = {weight : -1}) {
+        return _findBook(condition, cb, limit, sort);
     }
     static getBooksDefault(req, res) {
-        findBook({}, (err, books) => {
+        _findBook({}, (err, books) => {
             if(err) return handleError(err, null);
-            returnBooks(books, req, (books) => {res.json(books);});
+            _returnBooks(books, req, (books) => {res.json(books);});
         });
     }
 
     static getRecommendedBooks(req, res) {
-        findBook({}, (err, books) => {
+        _findBook({}, (err, books) => {
             if(err) return handleError(err, null);
-            returnBooks(books, req, (books) => {res.json(books);});
+            _returnBooks(books, req, (books) => {res.json(books);});
         });
     }
 
     static getRecommendedEntries(req, res) {
-        findBook({}, (err, books) => {
+        _findBook({}, (err, books) => {
             if(err) return handleError(err, null);
-            returnBooks(books, req, (books) => {
+            _returnBooks(books, req, (books) => {
                 PostAPI.findPost({}, (err, posts) => {
                     if(err) return handleError(err, res);
                     PostAPI.returnPosts(posts, req, (posts) => {
@@ -210,9 +228,9 @@ export default class BookAPI {
                 var stores = user.stores.map(toMongoID);
 
                 const condition = {_id: {$in: stores}};
-                findBook(condition, (err, books) => {
+                _findBook(condition, (err, books) => {
                     if(err) return handleError(err, res);
-                    returnBooks(books, req, (books)=> {res.json(books);});
+                    _returnBooks(books, req, (books)=> {res.json(books);});
                 });  
                   
             });
@@ -231,9 +249,9 @@ export default class BookAPI {
                 var stores = user.stores.map(toMongoID);
 
                 const condition = {$or: [{author: {$in: follows}}, {_id: {$in: stores}}]};
-                findBook(condition, (err, books) => {
+                _findBook(condition, (err, books) => {
                     if(err) return handleError(err, res);
-                    returnBooks(books, req, (books)=> {res.json(books);});
+                    _returnBooks(books, req, (books)=> {res.json(books);});
                 });  
                   
             });
@@ -249,13 +267,13 @@ export default class BookAPI {
 
                 const condition = {$or: [{author: {$in: follows}}, {_id: {$in: stores}}]};
                 const condition2 = {author: {$in: follows}};
-                findBook(condition, (err, books) => {
+                _findBook(condition, (err, books) => {
                     if(err) return handleError(err, res);
-                    returnBooks(books, req, (books) => {
+                    _returnBooks(books, req, (books) => {
                         PostAPI.findPost(condition2, (err, posts) => {
                             if(err) return handleError(err, res);
                             PostAPI.returnPosts(posts, req, (posts) => {
-                                mergeBooksAndPosts(books, posts, (merge) => {
+                                mergeBooksAndPosts2(books, posts, (merge) => {
                                     res.json(merge);
                                 });
                             });
@@ -269,7 +287,7 @@ export default class BookAPI {
                         const condition = {$or: [{author: {$in: follows}}, {_id: {$in: stores}}]};
                         findBook(condition, (err, books) => {
                             if(err) return handleError(err, res);
-                            returnBooks(books, req, cb);
+                            _returnBooks(books, req, cb);
                         });      
                     },
                     //find Posts
@@ -302,10 +320,10 @@ export default class BookAPI {
                 var storedList = user.storedList.map(toMongoID);
 
                 const condition = {_id: {$in: storedList}};
-                findBook(condition, (err, books) => {
+                _findBook(condition, (err, books) => {
                     if(err) return handleError(err, res);
                     var newBooks = [];
-                    returnBooks(books, req, (books) => {
+                    _returnBooks(books, req, (books) => {
                         storedList.map((_id) => {
                             var book = books.find((book) => {
                                 return _id == book._id;
@@ -315,7 +333,7 @@ export default class BookAPI {
                         res.json(newBooks);
                     });
 
-                    //returnBooks(books, req, (books)=> {res.json(books);});
+                    //_returnBooks(books, req, (books)=> {res.json(books);});
                 }, 8);      
             });
         });
@@ -333,9 +351,9 @@ export default class BookAPI {
                 var historys = user.bookHistorys.map(toMongoID);
 
                 const condition = {_id: {$in: historys}};
-                findBook(condition, (err, books) => {
+                _findBook(condition, (err, books) => {
                     if(err) return handleError(err, res);
-                    returnBooks(books, req, (books) => {
+                    _returnBooks(books, req, (books) => {
                         historys = historys.map((_id) => {
                             return books.find((book) => {return _id == book._id});
                         });
@@ -354,13 +372,13 @@ export default class BookAPI {
             var tmp = JSON.parse(JSON.stringify(users));
             tmp = tmp.map((user) => {return Mongoose.Types.ObjectId(user._id)});
          
-            findBook({$or: [
+            _findBook({$or: [
                 {title: search},
                 {author:{$in: tmp}}
             ]}, (err, books) => {
                 if(err) return handleError(err, res);
                 //res.json(books);
-                returnBooks(books, req, (books)=> {res.json(books);});
+                _returnBooks(books, req, (books)=> {res.json(books);});
             }, 20);    
         });
     }
@@ -370,9 +388,9 @@ export default class BookAPI {
         if(!userID){
             return handleError("non-valid input", res);
         }
-        findBook({author: Mongoose.Types.ObjectId(userID)}, (err, books) => {
+        _findBook({author: Mongoose.Types.ObjectId(userID)}, (err, books) => {
             if(err) return handleError(err, res);
-            returnBooks(books, req, (books)=> {res.json(books);});
+            _returnBooks(books, req, (books)=> {res.json(books);});
         });    
     }
 
@@ -382,13 +400,13 @@ export default class BookAPI {
             return handleError("non-valid input", res);
         }
         const condition = {author: Mongoose.Types.ObjectId(userID)};
-        findBook(condition, (err, books) => {
+        _findBook(condition, (err, books) => {
             if(err) return handleError(err, res);
-            returnBooks(books, req, (books) => {
+            _returnBooks(books, req, (books) => {
                 PostAPI.findPost(condition, (err, posts) => {
                     if(err) return handleError(err, res);
                     PostAPI.returnPosts(posts, req, (posts) => {
-                        mergeBooksAndPosts(books, posts, (merge) => {
+                        mergeBooksAndPosts2(books, posts, (merge) => {
                             res.json(merge);
                         });
                         //res.json(books);
@@ -401,7 +419,7 @@ Async.parallel([
             function(cb) {
                 findBook(condition, (err, books) => {
                     if(err) return handleError(err, res);
-                    returnBooks(books, req, cb);
+                    _returnBooks(books, req, cb);
                 });      
             },
             //find Posts
@@ -431,9 +449,9 @@ Async.parallel([
         if(!bookID){
             return handleError("non-valid input", res);
         }
-        findBook({_id: Mongoose.Types.ObjectId(bookID)}, (err, books) => {
+        _findBook({_id: Mongoose.Types.ObjectId(bookID)}, (err, books) => {
             if(err) return handleError(err, res);
-            returnBooks(books, req, (books)=> {res.json(books[0]);});
+            _returnBooks(books, req, (books)=> {res.json(books[0]);});
         }); 
     }
 
@@ -486,11 +504,14 @@ Async.parallel([
                     var historys = JSON.parse(JSON.stringify(user.bookHistorys));
                     //re push the item for making the item in the first and unique
                     if(!historys) historys = [];
-                        historys = historys.filter((item) => {
-                            return item.book != book._id;
+                    historys = historys.filter((item) => {
+                        return item.book != book._id;
                     });
                     historys.unshift({book: book._id, section: sectionID, sectionNum: num});
-                    User.update({_id: user._id}, {$set: {bookHistorys: historys}}, (err)=>{if(err) console.log(err)});
+                    User.update({_id: user._id}, {$set: {bookHistorys: historys}}, (err) => {if(err) console.log(err)});
+                    if(!user.lastReadTime || ((new Date() - new Date(user.lastReadTime)) / 1000 > 3600)) {
+                        User.update({_id: user._id}, {$set: {readBookCnt: user.readBookCnt + 1, lastReadTime: new Date()}}, (err) => {});
+                    }
                 }
         
                 //set readNum
@@ -511,7 +532,7 @@ Async.parallel([
                     Book.update({_id: book._id}, {$push: {readMeta: {ip: ip, time: Date.now()}}}, (err) => {});
                 }
                 if(isNewRead) {
-                    Book.update({_id: book._id}, {$inc: {readCnt: 1, point: READWEIGHT}}, (err) => {});
+                    Book.update({_id: book._id}, {$inc: {readCnt: 1, point: READWEIGHT}}, (err) => {});                   
                 }
             });
         });
@@ -639,7 +660,6 @@ Async.parallel([
     static postBookSection(req, res) {
         const bookID = req.body.bookID;
         const title = req.body.title;
-        
         if(!bookID) {
             return handleError("non-valid input", res);
         }
@@ -658,8 +678,10 @@ Async.parallel([
             const token = result[0];
             const book = result[1];
             const article = result[2];
+            console.log(book);
+            console.log(article);
             if(token._id != book.author) return handleError(err, res);
-            Book.update({_id: bookID}, {$addToSet: {sections: article._id}}, (err) => {
+            Book.update({_id: book._id}, {$addToSet: {sections: article._id}}, {strict: false}, (err) => {
                 if(err) {
                     return handleError(err, res);
                 }
@@ -700,7 +722,6 @@ Async.parallel([
         const sectionID = req.body.sectionID;
         const title = req.body.title;
         const content = req.body.content;
-        
         if(!sectionID || !content || !title) {
             return handleError("non-valid input", res);
         }
@@ -717,6 +738,7 @@ Async.parallel([
                     if(err) {
                         return handleError(err, res);
                     }
+                    _updateTime(book._id);
                     return handleSuccess({}, res);
                 });
             });

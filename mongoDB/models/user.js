@@ -34,7 +34,10 @@ var userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'UserModel'
     }],
-    //system's data 
+    //meta
+
+    lastReadTime: {type: Date},
+    readBookCnt: {type: Number, default: 1},
     rank: {type: Number, default: 1}
 });
 
