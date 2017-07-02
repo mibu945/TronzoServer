@@ -20,7 +20,7 @@
     "fb": "^2.0.0",
     "forever": "^0.15.3",
     "jwt-simple": "^0.5.1",
-    "mongoose": "^4.9.0",
+    "mongoose": "4.9.0",
     "node-schedule": "^1.2.3",
     "nodemon": "^1.11.0",
     "public-ip": "^2.3.3"

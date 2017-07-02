@@ -6,6 +6,7 @@ import Article from '../mongoDB/models/article';
 import Image from '../mongoDB/models/image';
 import Auth from './auth';
 import PostAPI from './postAPI';
+import Utility from './utility';
 
 import Fs from 'fs';
 import Ip from 'public-ip';
@@ -15,27 +16,6 @@ const STOREWEIGHT = 500;
 const LIKEWEIGHT = 35;
 const READWEIGHT = 1;
 
-function toMongoID(_id){
-    return Mongoose.Types.ObjectId(_id);
-}
-
-function handleError(err, res) {
-    console.log(err + " in BookAPI");
-    if(!err){
-        err = "NO DATA";
-        return res.status(400).json({error: err});
-    }
-    if(err.errmsg) {
-        res.status(400).json({error: err.errmsg});
-    } else {
-        res.status(400).json({error: err});
-    }
-}
-
-function handleSuccess(suc, res) {
-    suc.suc = "OK";
-    res.json(suc);
-}
 
 function mergeBooksAndPosts2(books, posts, cb){
     var merge = books.concat(posts);
@@ -72,40 +52,77 @@ function mergeBooksAndPosts(books, posts, cb){
     }
     return cb(merge);
 }
-
-function _returnBooks(books, req, cb){
-    Async.parallel([
+function _returnPosts(posts, req, cb) {
+    Async.waterfall([
         function(cb) {
             Auth.auth(req, (err, token) => {
-                if(err) return cb(null, null);
-                User.findOne({_id: token._id}, "_id bookHistorys", cb);
+                cb(null, token);
             });
         },
-        function(cb) {
-            Ip.v4().then((ipv4) => {cb(null, ipv4)});
+        function(token, cb) {
+            if(token) User.findOne({_id: token._id}, "_id", cb);
+            else cb(null, null);
         }
     ], (err, result) => {
-        if(err){
-            console.log(err);
-            return cb([]);
-        }
-        const user = result[0];
-        const ip = result[1];
-        var tmp = JSON.parse(JSON.stringify(books));
+        if(err) return cb([]);
+        const user = result;
+        
+	    var tmp = JSON.parse(JSON.stringify(posts));
         function isExist(tmp) {
-            if(user) return tmp == user._id;
-            return false;
+            return user ? tmp == user._id : false;
         }
+        return cb(tmp.map((post) => {
+            post.type = "post";
+            post.author.profilePic = Utility.transCompleteAddress(post.author.profilePic);
+            post.book.author.profilePic = Utility.transCompleteAddress(post.book.author.profilePic);
+            post.book.cover = Utility.transCompleteAddress(post.book.cover);
+            
+            post.comments = post.comments.map((comment) => {
+                comment.author.profilePic = Utility.transCompleteAddress(comment.author.profilePic);
+                return comment;
+            });
+            post.shares = post.shareUsers ? post.shareUsers.length : 0;
+            
+            if(post.likeUsers) {
+                post.isLike = ( post.likeUsers.find(isExist) != null);
+                post.likes = post.likeUsers.length;
+            } else {
+                post.isLike = false;
+                post.likes = 0;
+            }
+
+            delete post.likeUsers;
+            delete post.shareUsers;
+            delete post.updateTime;
+            return post;
+        }));
+    });
+}
+function _returnBooks(books, req, cb){
+    Async.waterfall([
+        function(cb) {
+            Auth.auth(req, (err, token) => {
+                cb(null, token);
+            });
+        },
+        function(token, cb) {
+            if(token) User.findOne({_id: token._id}, "_id bookHistorys", cb);
+            else cb(null, null);
+        }
+    ], (err, result) => {
+        if(err) return cb([]);
+        const user = result;
+     
+        var tmp = JSON.parse(JSON.stringify(books));
+
+        function isExist(tmp) { return user ? tmp == user._id : false; }
+        
         return cb(tmp.map((book) => {
-            book.type = "book";
-            if(book.cover) {
-                book.cover = "http://" + ip + ":3000/get/image?id=" + book.cover;
-            }
             //for lookup case
-            if(book.author[0])book.author = book.author[0];
-            if(book.author && book.author.profilePic) {
-                book.author.profilePic = "http://" + ip + ":3000/get/image?id=" + book.author.profilePic;
-            }
+            if(book.author[0]) book.author = book.author[0];
+            book.type = "book";
+            book.cover = Utility.transCompleteAddress(book.cover);
+            book.author.profilePic = Utility.transCompleteAddress(book.author.profilePic);
             book.shares = book.shareUsers ? book.shareUsers.length : 0;
             
             if(book.likeUsers) {
@@ -123,7 +140,7 @@ function _returnBooks(books, req, cb){
                 book.stores = 0;
             }
             if(user && user.bookHistorys) {
-                const his = user.bookHistorys.find((item) => {return item.book == book._id});
+                const his = user.bookHistorys.find(item => {return item.book == book._id});
                 if(his) book.lastReadSection = his.sectionNum;
             }
             //delete book.updateTime;
@@ -189,24 +206,24 @@ export default class BookAPI {
     }
     static getBooksDefault(req, res) {
         _findBook({}, (err, books) => {
-            if(err) return handleError(err, null);
+            if(err) return Utility.handleError(err, null);
             _returnBooks(books, req, (books) => {res.json(books);});
         });
     }
 
     static getRecommendedBooks(req, res) {
         _findBook({}, (err, books) => {
-            if(err) return handleError(err, null);
+            if(err) return Utility.handleError(err, null);
             _returnBooks(books, req, (books) => {res.json(books);});
         });
     }
 
     static getRecommendedEntries(req, res) {
-        _findBook({}, (err, books) => {
-            if(err) return handleError(err, null);
+	    _findBook({}, (err, books) => {
+            if(err) return Utility.handleError(err, null);
             _returnBooks(books, req, (books) => {
                 PostAPI.findPost({}, (err, posts) => {
-                    if(err) return handleError(err, res);
+                    if(err) return Utility.handleError(err, res);
                     PostAPI.returnPosts(posts, req, (posts) => {
                         mergeBooksAndPosts(books, posts, (merge) => {
                             res.json(merge);
@@ -221,15 +238,12 @@ export default class BookAPI {
             if(err || !token) return res.json([]);
             User.findOne({_id: token._id}, "stores", (err, user) => {
                 if(err || !user) return res.json([]);
-                function toMongoID(_id){
-                    return Mongoose.Types.ObjectId(_id);
-                }
                 
-                var stores = user.stores.map(toMongoID);
+                var stores = user.stores.map(Utility.transMongoID);
 
                 const condition = {_id: {$in: stores}};
                 _findBook(condition, (err, books) => {
-                    if(err) return handleError(err, res);
+                    if(err) return Utility.handleError(err, res);
                     _returnBooks(books, req, (books)=> {res.json(books);});
                 });  
                   
@@ -241,16 +255,13 @@ export default class BookAPI {
             if(err || !token) return res.json([]);
             User.findOne({_id: token._id}, "stores follows", (err, user) => {
                 if(err || !user) return res.json([]);
-                function toMongoID(_id){
-                    return Mongoose.Types.ObjectId(_id);
-                }
                 
-                var follows = user.follows.map(toMongoID);
-                var stores = user.stores.map(toMongoID);
+                var follows = user.follows.map(Utility.transMongoID);
+                var stores = user.stores.map(Utility.transMongoID);
 
                 const condition = {$or: [{author: {$in: follows}}, {_id: {$in: stores}}]};
                 _findBook(condition, (err, books) => {
-                    if(err) return handleError(err, res);
+                    if(err) return Utility.handleError(err, res);
                     _returnBooks(books, req, (books)=> {res.json(books);});
                 });  
                   
@@ -262,16 +273,16 @@ export default class BookAPI {
             if(err || !token) return res.json([]);
             User.findOne({_id: token._id}, "stores follows", (err, user) => {
                 if(err || !user) return res.json([]);
-                const follows = user.follows.map(toMongoID);
-                const stores = user.stores.map(toMongoID);
+                const follows = user.follows.map(Utility.transMongoID);
+                const stores = user.stores.map(Utility.transMongoID);
 
                 const condition = {$or: [{author: {$in: follows}}, {_id: {$in: stores}}]};
                 const condition2 = {author: {$in: follows}};
                 _findBook(condition, (err, books) => {
-                    if(err) return handleError(err, res);
+                    if(err) return Utility.handleError(err, res);
                     _returnBooks(books, req, (books) => {
                         PostAPI.findPost(condition2, (err, posts) => {
-                            if(err) return handleError(err, res);
+                            if(err) return Utility.handleError(err, res);
                             PostAPI.returnPosts(posts, req, (posts) => {
                                 mergeBooksAndPosts2(books, posts, (merge) => {
                                     res.json(merge);
@@ -286,7 +297,7 @@ export default class BookAPI {
                     function(cb) {
                         const condition = {$or: [{author: {$in: follows}}, {_id: {$in: stores}}]};
                         findBook(condition, (err, books) => {
-                            if(err) return handleError(err, res);
+                            if(err) return Utility.handleError(err, res);
                             _returnBooks(books, req, cb);
                         });      
                     },
@@ -294,7 +305,7 @@ export default class BookAPI {
                     function(cb) {
                         const condition = {$or: [{author: {$in: follows}}, {book: {$in: stores}}]};
                         findPost(condition, (err, posts) => {
-                            if(err) return handleError(err, res);
+                            if(err) return Utility.handleError(err, res);
                             returnPosts(posts, req, cb);
                         }); 
                     },
@@ -313,15 +324,12 @@ export default class BookAPI {
             if(err || !token) return res.json([]);
             User.findOne({_id: token._id}, "storedList", (err, user) => {
                 if(err || !user) return res.json([]);
-                function toMongoID(_id){
-                    return Mongoose.Types.ObjectId(_id);
-                }
                 
-                var storedList = user.storedList.map(toMongoID);
+                var storedList = user.storedList.map(Utility.transMongoID);
 
                 const condition = {_id: {$in: storedList}};
                 _findBook(condition, (err, books) => {
-                    if(err) return handleError(err, res);
+                    if(err) return Utility.handleError(err, res);
                     var newBooks = [];
                     _returnBooks(books, req, (books) => {
                         storedList.map((_id) => {
@@ -344,15 +352,12 @@ export default class BookAPI {
             if(err || !token) return res.json([]);
             User.findOne({_id: token._id}, "bookHistorys", (err, user) => {
                 if(err || !user) return res.json([]);
-                function toMongoID(item){
-                    return Mongoose.Types.ObjectId(item.book);
-                }
                 
-                var historys = user.bookHistorys.map(toMongoID);
+                var historys = user.bookHistorys.map(item => {return Utility.transMongoID(item.book)});
 
                 const condition = {_id: {$in: historys}};
                 _findBook(condition, (err, books) => {
-                    if(err) return handleError(err, res);
+                    if(err) return Utility.handleError(err, res);
                     _returnBooks(books, req, (books) => {
                         historys = historys.map((_id) => {
                             return books.find((book) => {return _id == book._id});
@@ -368,7 +373,7 @@ export default class BookAPI {
         const title = req.query.title;
         const search = new RegExp(title, "i");
         User.find({name: search}, "_id", (err, users) => {
-            if(err) return handleError(err, res);
+            if(err) return Utility.handleError(err, res);
             var tmp = JSON.parse(JSON.stringify(users));
             tmp = tmp.map((user) => {return Mongoose.Types.ObjectId(user._id)});
          
@@ -376,7 +381,7 @@ export default class BookAPI {
                 {title: search},
                 {author:{$in: tmp}}
             ]}, (err, books) => {
-                if(err) return handleError(err, res);
+                if(err) return Utility.handleError(err, res);
                 //res.json(books);
                 _returnBooks(books, req, (books)=> {res.json(books);});
             }, 20);    
@@ -386,10 +391,10 @@ export default class BookAPI {
     static getBooksByUser(req, res) { 
         const userID = req.query.userID;
         if(!userID){
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         _findBook({author: Mongoose.Types.ObjectId(userID)}, (err, books) => {
-            if(err) return handleError(err, res);
+            if(err) return Utility.handleError(err, res);
             _returnBooks(books, req, (books)=> {res.json(books);});
         });    
     }
@@ -397,14 +402,14 @@ export default class BookAPI {
     static getEntriesByUser(req, res) { 
         const userID = req.query.userID;
         if(!userID){
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         const condition = {author: Mongoose.Types.ObjectId(userID)};
         _findBook(condition, (err, books) => {
-            if(err) return handleError(err, res);
+            if(err) return Utility.handleError(err, res);
             _returnBooks(books, req, (books) => {
                 PostAPI.findPost(condition, (err, posts) => {
-                    if(err) return handleError(err, res);
+                    if(err) return Utility.handleError(err, res);
                     PostAPI.returnPosts(posts, req, (posts) => {
                         mergeBooksAndPosts2(books, posts, (merge) => {
                             res.json(merge);
@@ -418,14 +423,14 @@ Async.parallel([
             //find Books
             function(cb) {
                 findBook(condition, (err, books) => {
-                    if(err) return handleError(err, res);
+                    if(err) return Utility.handleError(err, res);
                     _returnBooks(books, req, cb);
                 });      
             },
             //find Posts
             function(cb) {
                 findPost(condition, (err, posts) => {
-                    if(err) return handleError(err, res);
+                    if(err) return Utility.handleError(err, res);
                     //console.log(posts);
                     //cb([]);
                     returnPosts(posts, req, cb);
@@ -447,10 +452,10 @@ Async.parallel([
     static getBookByID(req, res) {
         const bookID = req.query.bookID;
         if(!bookID){
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         _findBook({_id: Mongoose.Types.ObjectId(bookID)}, (err, books) => {
-            if(err) return handleError(err, res);
+            if(err) return Utility.handleError(err, res);
             _returnBooks(books, req, (books)=> {res.json(books[0]);});
         }); 
     }
@@ -460,7 +465,7 @@ Async.parallel([
         const bookID = req.query.bookID;
         var num = req.query.num;
         if(!sectionID && (!bookID || !num)){
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Async.parallel([
             //find Logining User
@@ -479,14 +484,14 @@ Async.parallel([
                 }
             },
         ], (err, result) => {
-            if(err) return handleError(err, res);
+            if(err) return Utility.handleError(err, res);
             const user = result[0];
             const book = result[1];
-            if(!book) return handleError(err, res);
+            if(!book) return Utility.handleError(err, res);
 
             if(!sectionID || sectionID.length != 24) {
                 if(book.sections.length < num) {
-                    return handleError("no the section", res);
+                    return Utility.handleError("no the section", res);
                 }
                 sectionID = book.sections[num - 1];
             } else {
@@ -495,7 +500,7 @@ Async.parallel([
             //return the section
             Article.findOne({_id: sectionID}, "title content createTime", (err, article) => {
                 if(err || !article){
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
                 //response the section
                 res.json(article);
@@ -545,43 +550,37 @@ Async.parallel([
         const times = req.query.times;
         var valid = true;
         valid = bookID && num && pageNum && amount && times;
-        if(!valid) {
-            return handleError("non-valid input", res);
-        }
+        if(!valid) return Utility.handleError("non-valid input", res);
         //console.log("1 ok");    
         //valid = bookID.match(/^[0-9a-fA-F]{24}$/) && pageNum.match("^/d$") && pageNum.match("^/d$") && amount.match("^/d$") && times.match("^/d$");
         
-        if(!valid) {
-            return handleError("non-valid input", res);
-        }
         Book.findOne({_id: bookID}, (err, book) => {
-            if(err)return handleError(err, res);
-            if(!book || !book.sections || book.sections.length < num) {
-                return res.json([]);
-            }
+            if(err) return Utility.handleError(err, res);
+            if(!book || !book.sections || book.sections.length < num) return res.json([]);
+            
             const sectionID = book.sections[num - 1];
-            Article.findOne({_id: sectionID}, "comments.content comments.pageNum", (err, article) => {
-                if(err) return handleError(err, res);
+            const searchingComments = { comments: { $elemMatch: { pageNum: pageNum }}};
+            Article
+            .findOne({_id: sectionID}, "comments")
+            .populate("comments.author", "name profilePic")
+            .exec((err, article) => {
+                if(err) return Utility.handleError(err, res);
                 if(!article || !article.comments) return res.json([]);
                 var comments = JSON.parse(JSON.stringify(article.comments));
-                
                 var comments = comments
-                    .filter((comment) => {
+                    .filter(comment => {
                         return comment.pageNum == pageNum;
-                    })
+                     })
                     .map((comment) => {
-                        delete comment.pageNum;
+                        comment.author.profilePic = Utility.transCompleteAddress(comment.author.profilePic);
+                        //delete comment.pageNum;
                         return comment;
                     });
-                if(amount <= 0 || times <= 0) {
-                    return res.json(comments);
-                } else {
-                    var start = amount * (times - 1);
-                    var end = 1 * start + 1 * amount;
-                    return res.json(comments.slice(start, end));
-                }
-                res.json([]);
+                if(amount <= 0 || times <= 0) return res.json(comments);
                 
+                const start = amount * (times - 1);
+                const end = 1 * start + 1 * amount;
+                return res.json(comments.slice(start, end));
             });
         });
     }
@@ -594,17 +593,17 @@ Async.parallel([
         var cover = req.body.cover;
 
 	    if(!title || !type || !cover) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         cover = new Buffer(cover.split(",")[1], 'base64');
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
 	        const data = cover;
 	        Image.create({data: data}, (err, cover) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }    
                 Book.create({author: token._id,
                     title: title,
@@ -613,7 +612,7 @@ Async.parallel([
                     cover: cover._id,
                 }, (err, book) => {
                     if(err) {
-                        return handleError(err, res);
+                        return Utility.handleError(err, res);
                     }
                     res.json({_id: book._id});
                 });
@@ -628,15 +627,15 @@ Async.parallel([
         const content = req.body.content;
         
         if(!bookID || !content || !num || !pageNum) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
             Book.findOne({_id: bookID}, "sections", (err, book) => {
                 if(err || !book || book.sections.length < num) {
-                    return handleError("no the section", res);
+                    return Utility.handleError("no the section", res);
                 }
                 const sectionID = book.sections[num - 1];
                 Article.findOneAndUpdate(
@@ -650,8 +649,8 @@ Async.parallel([
                         }
                     },
                     (err, article) => {
-                        if(err || !article) return handleError(err, res);
-                        return handleSuccess({}, res);
+                        if(err || !article) return Utility.handleError(err, res);
+                        return Utility.handleSuccess({}, res);
                     }
                 );
             });
@@ -661,7 +660,7 @@ Async.parallel([
         const bookID = req.body.bookID;
         const title = req.body.title;
         if(!bookID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Async.parallel([
             function(cb){
@@ -674,18 +673,18 @@ Async.parallel([
                 Article.create({title: title}, cb);
             }
         ], (err, result) => {
-            if(err) return handleError(err, res);
+            if(err) return Utility.handleError(err, res);
             const token = result[0];
             const book = result[1];
             const article = result[2];
             console.log(book);
             console.log(article);
-            if(token._id != book.author) return handleError(err, res);
+            if(token._id != book.author) return Utility.handleError(err, res);
             Book.update({_id: book._id}, {$addToSet: {sections: article._id}}, {strict: false}, (err) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
-                return handleSuccess({_id: article._id}, res);
+                return Utility.handleSuccess({_id: article._id}, res);
             });   
         });
     }
@@ -698,12 +697,12 @@ Async.parallel([
         const description = req.body.description;
         
         if(!bookID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
 
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
             var book = {};
             if(title) book.title = title;
@@ -711,9 +710,9 @@ Async.parallel([
             if(description) book.description = description;
             Book.update({_id: bookID, author: token._id},  {$set: book}, (err) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
-                return handleSuccess({}, res);
+                return Utility.handleSuccess({}, res);
             });
         });
     }
@@ -723,23 +722,23 @@ Async.parallel([
         const title = req.body.title;
         const content = req.body.content;
         if(!sectionID || !content || !title) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
             Book.findOne({author: token._id, sections: {$in: [sectionID]}}, 
             (err, book) => {
                 if(err || !book) {
-                    return handleError(err, res);;
+                    return Utility.handleError(err, res);;
                 }
                 Article.update({_id: sectionID}, {$set: {title: title, content: content, wordCnt: content.length}}, (err) => {
                     if(err) {
-                        return handleError(err, res);
+                        return Utility.handleError(err, res);
                     }
                     _updateTime(book._id);
-                    return handleSuccess({}, res);
+                    return Utility.handleSuccess({}, res);
                 });
             });
         });
@@ -747,17 +746,17 @@ Async.parallel([
     static putShareBook(req, res) {
         const bookID = req.body.bookID;
         if(!bookID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
             Book.findOneAndUpdate({_id: bookID}, {$addToSet: {shareUsers: token._id}}, (err, book) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
-                return handleSuccess({}, res);
+                return Utility.handleSuccess({}, res);
             });  
         });
     }
@@ -766,19 +765,19 @@ Async.parallel([
         const bookID = req.body.bookID;
         
         if(!bookID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
-            Book.update({_id: bookID}, {$addToSet: {likeUsers: token._id}}, (err) => {
+            Book.update({_id: Utility.transMongoID(bookID)}, {$addToSet: {likeUsers: token._id}}, (err) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
 
-                Book.update({_id: bookID}, {$inc: {point: LIKEWEIGHT}}, (err)=>{});
-                return handleSuccess({}, res);
+                Book.update({_id: Utility.transMongoID(bookID)}, {$inc: {point: LIKEWEIGHT}}, (err)=>{});
+                return Utility.handleSuccess({}, res);
             });  
         });
 
@@ -788,30 +787,30 @@ Async.parallel([
         const bookID = req.body.bookID;
         
         if(!bookID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
-            Book.update({_id: bookID}, {$pull: {likeUsers: token._id}}, (err) => {
+            Book.update({_id: Utility.transMongoID(bookID)}, {$pull: {likeUsers: token._id}}, (err) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
 
-                Book.update({_id: bookID}, {$inc: {point: -1 * LIKEWEIGHT}}, (err)=>{});
-                return handleSuccess({}, res);
+                Book.update({_id: Utility.transMongoID(bookID)}, {$inc: {point: -1 * LIKEWEIGHT}}, (err)=>{});
+                return Utility.handleSuccess({}, res);
             });  
         });
     }
     static putStoreBook(req, res) {
         const bookID = req.body.bookID;
         if(!bookID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
             Async.parallel([
                 function(cb){
@@ -822,10 +821,10 @@ Async.parallel([
                 }
             ], (err) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
                 Book.update({_id: bookID}, {$inc: {point: STOREWEIGHT}}, (err)=>{});
-                return handleSuccess({}, res);
+                return Utility.handleSuccess({}, res);
             });
         });
     }
@@ -833,11 +832,11 @@ Async.parallel([
     static putCancelStoreBook(req, res) {
         const bookID = req.body.bookID;
         if(!bookID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
             Async.parallel([
                 function(cb){
@@ -847,18 +846,18 @@ Async.parallel([
                     Book.update({_id: bookID}, {$pull: {storeUsers: token._id}}, cb);           }           
             ], (err) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
 
                 Book.update({_id: bookID}, {$inc: {point: -1 * STOREWEIGHT}}, (err)=>{});
-                return handleSuccess({}, res);
+                return Utility.handleSuccess({}, res);
             });
         });
     }
     static putStoredList(req, res) {
         const bookIDs = req.body.bookIDs;
         if(!bookIDs) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         var newList = [];
         bookIDs.map((id) => {
@@ -867,14 +866,10 @@ Async.parallel([
             }
         });
         Auth.auth(req, (err, token) => {
-            if(err) {
-               return handleError(err, res);
-            }
+            if(err) return Utility.handleError(err, res);
             User.update({_id: token._id}, {$set: {storedList: newList.slice(0, 8)}}, (err) => {
-                if(err) {
-                    return handleError(err, res);
-                }
-                return handleSuccess({}, res); 
+                if(err) return Utility.handleError(err, res);
+                return Utility.handleSuccess({}, res); 
             });
         });
     }
@@ -882,16 +877,14 @@ Async.parallel([
         const bookID = req.body.bookID;
 
         if(!bookID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         Auth.auth(req, (err, token) => {
-            if(err) {
-               return handleError(err, res);
-            }
+            if(err) return Utility.handleError(err, res);
             //TODO
             Book.remove({_id: bookID, userID: token._id}, (err) => {
-                if(err) return handleError(err, res);
-                return handleSuccess({}, res);
+                if(err) return Utility.handleError(err, res);
+                return Utility.handleSuccess({}, res);
             });
         });
     }
@@ -900,20 +893,32 @@ Async.parallel([
     static deleteBookSection(req, res) {
         const sectionID = req.body.sectionID;
         if(!sectionID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
 
         Auth.auth(req, (err, token) => {
             if(err) {
-               return handleError(err, res);
+               return Utility.handleError(err, res);
             }
             Book.update({author: token._id}, 
             {$pull: {sections: sectionID}}, (err) => {
-                if(err) return handleError(err, res);
+                if(err) return Utility.handleError(err, res);
                 Article.remove({_id: sectionID}, (err) => {
-                    if(err) return handleError(err, res);
-                    return handleSuccess({}, res);
+                    if(err) return Utility.handleError(err, res);
+                    return Utility.handleSuccess({}, res);
                 });
+            });
+        });
+    }
+    static deleteBookComment(req, res) {
+        const commentID = req.body.commentID;
+        if(!commentID) return Utility.handleError("non-valid input", res);
+
+        Auth.auth(req, (err, token) => {
+            if(err) return Utility.handleError(err, res);
+            Article.update({"comments._id": commentID, "comments.author": token._id}, {$pull: {comments: {_id: commentID}}}, err => {
+                if(err) return Utility.handleError(err, res);
+                return Utility.handleSuccess({}, res);
             });
         });
     }

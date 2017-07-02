@@ -86,7 +86,7 @@ app.post('/put/storedList', BookAPI.putStoredList);
 app.post('/put/shareBook', BookAPI.putShareBook);
 app.post('/delete/book', BookAPI.deleteBook);
 app.post('/delete/bookSection', BookAPI.deleteBookSection);
-
+app.post('/delete/bookComment', BookAPI.deleteBookComment);
 //Image router
 app.get('/get/image', ImageAPI.getImage);
 

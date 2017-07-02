@@ -3,34 +3,16 @@ import User from '../mongoDB/models/user';
 import Image from '../mongoDB/models/image';
 import Post from '../mongoDB/models/post';
 import Auth from './auth';
+import Utility from './utility';
+
 import Fs from 'fs';
 import Ip from 'public-ip';
 import Async from 'async';
-function handleError(err, res) {
-    console.log(err + " in UserAPI");
-    if(!err){
-        err = "NO DATA";
-        return res.status(400).json({error: err});
-    }
-    if(err.errmsg) {
-        res.status(400).json({error: err.errmsg});
-    } else {
-        res.status(400).json({error: err});
-    }
-}
-
-function handleSuccess(suc, res) {
-    suc.suc = "ok";
-    res.json(suc);
-}
 
 function findUser(userID, loginID, cb) {
     Async.parallel([
         function(cb) {
             User.findOne({_id: userID}, cb);
-        },
-        function(cb) {
-            Ip.v4().then((ipv4) => {cb(null, ipv4)});
         },
         function(cb) {
             Book
@@ -53,21 +35,17 @@ function findUser(userID, loginID, cb) {
             return cb(err, null);
         }
         const user = res[0];
-        const ip = res[1];
-        const books = res[2];
-        const followNum = res[3].length;
-        const posts = res[5];
-        var LoginUserFollowUsers;
-        if(res[4])LoginUserFollowUsers = res[4].follows;
-        else LoginUserFollowUsers = [];
+        const books = res[1];
+        const followNum = res[2].length;
+        const LoginUserFollowUsers = res[3] ? res[3].follows : [];
+        const posts = res[4];
+
         var resUser = {};
         resUser._id = user._id;
         resUser.name = user.name;
         resUser.description = user.description;
-        if(user.profilePic) {
-            resUser.profilePic = "http://" + ip + ":3000/get/image?id=" + user.profilePic;
-        }
-        resUser.rank = user.rank;
+        resUser.profilePic = Utility.transCompleteAddress(user.profilePic);
+        //resUser.rank = user.rank;
         resUser.books = books.length;
         resUser.likes = books.reduce((sum, book) => {
             sum += book.likeUsers.length;
@@ -77,7 +55,6 @@ function findUser(userID, loginID, cb) {
             sum += book.storeUsers.length;
             return sum;
         }, 0);
-
         resUser.readNum = books.reduce((sum, book) => {
             sum += book.readCnt;
             return sum;
@@ -89,17 +66,15 @@ function findUser(userID, loginID, cb) {
             }, 0);
             return sum;
         }, 0);
-        resUser.follows = followNum;
-        resUser.isFollow = false;
-        var index = LoginUserFollowUsers.indexOf(userID);
-        if(index > -1) {
-            resUser.isFollow = true;
-        }
-        var likePostCnt = posts.reduce((cnt, post) => {
+        const likePostCnt = posts.reduce((cnt, post) => {
             return cnt + (post.likeUsers ? post.likeUsers.length : 0);
         }, 0);
+        resUser.follows = followNum;
+        const index = LoginUserFollowUsers.indexOf(userID);
+        resUser.isFollow = index > -1 ? true : false; 
+        
         resUser.readerExp = user.readBookCnt * 300 + followNum * 10 + likePostCnt * 5;
-        resUser.authorExp = books.length + followNum * 5 + resUser.likes * 2 + resUser.stores;
+        resUser.authorExp = resUser.wordCnt / 5 + followNum * 5 + resUser.likes * 2 + resUser.stores;
         resUser.readBookCnt = user.readBookCnt;
         cb(null, resUser);
     });
@@ -128,11 +103,11 @@ export default class UserAPI {
     static getMe(req, res) {
         Auth.auth(req, (err, token) => {
             if(err) {
-                return handleError(err, res);
+                return Utility.handleError(err, res);
             }
             findUser(token._id, token._id , (err, user) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
                 res.json(user);  
             });
@@ -143,7 +118,7 @@ export default class UserAPI {
     static getUserByID(req, res) {
         const userID = req.query.userID;
         if (!userID) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
       
         Auth.auth(req, (err, token) => {
@@ -153,7 +128,7 @@ export default class UserAPI {
             findUser(userID, id, (err, user) => {
                 
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
                 res.json(user);  
             });
@@ -176,7 +151,7 @@ export default class UserAPI {
             if(password.length < 8 || password.length > 15) isValid = false;
         }
         if(!isValid) {
-            return handleError("non-valid input", res);
+            return Utility.handleError("non-valid input", res);
         }
         var user = {};
         user.name = name;
@@ -185,12 +160,12 @@ export default class UserAPI {
         if(birthday) user.birthday = birthday;
         if(gender) user.gender = gender;
         User.findOne({account: user.account}, (err, ans) => {
-            if(ans || err) return handleError("same account", res);
+            if(ans || err) return Utility.handleError("same account", res);
             User.create(user, (err, user2) => {
                 if(err) {
-                    return handleError(err, res);
+                    return Utility.handleError(err, res);
                 }
-                return handleSuccess({_id: user2._id}, res);
+                return Utility.handleSuccess({_id: user2._id}, res);
             });
         });
         
@@ -200,51 +175,46 @@ export default class UserAPI {
     static putUser(req, res) {
         //Updated data
         const description = req.body.description;
-        if(!description) {
-            return handleError("non-valid input", res);
-        }
+        if(!description) return Utility.handleError("non-valid input", res);
 
         Auth.auth(req, (err, token) => {
-            if(err) {
-               return handleError(err, res);
-            }
+            if(err) return Utility.handleError(err, res);
             User.update({_id: token._id}, {$set: {description: description}}, (err) => {
-                if(err) {
-                    return handleError(err, res);
-                }
-                return handleSuccess({}, res);
+                if(err) return Utility.handleError(err, res);
+                return Utility.handleSuccess({}, res);
+            });
+        }); 
+    }
+
+    static putUserName(req, res) {
+        const name = req.body.name;
+        if(!name) return Utility.handleError("non-valid input", res);
+        Auth.auth(req, (err, token) => {
+            if(err) return Utility.handleError(err, res);
+            User.update({_id: token._id}, {$set: {name: name}}, (err) => {
+                if(err) return Utility.handleError(err, res);
+                return Utility.handleSuccess({}, res);
             });
         }); 
     }
 
     static putUserProfilePic(req, res) {
         var pic = req.body.profilePic;
-        if(!pic) {
-            return handleError("non-valid input", res);
-        }
+        if(!pic) return Utility.handleError("non-valid input", res);
+       
         pic = new Buffer(pic.split(",")[1], 'base64');
         Auth.auth(req, (err, token) => {
-            if(err) {
-               return handleError(err, res);
-            }
+            if(err) return Utility.handleError(err, res);
+            
             User.findOne({_id: token._id}, "profilePic", (err, user) => {
-                if(err || !user){
-                    return handleError(err, res);
-                }
-                //const data = Fs.readFileSync(pic.path);
+                if(err || !user) return Utility.handleError(err, res);
 	            const data = pic;
                 Image.create({data: data}, (err, pic2) => {
-                    if(err) {
-                        return handleError(err, res);
-                    }
-                    if(user.profilePic){
-                        Image.remove({_id: user.profilePic});
-                    }
+                    if(err) return Utility.handleError(err, res);
+                    if(user.profilePic) Image.remove({_id: user.profilePic});
                     User.update({_id: token._id}, {$set: {profilePic: pic2._id}}, (err) => {
-                        if(err) {
-                            return handleError(err, res);
-                        }
-                        return handleSuccess({}, res);
+                        if(err) return Utility.handleError(err, res);
+                        return Utility.handleSuccess({}, res);
                     });
                 }); 
             });
@@ -255,18 +225,12 @@ export default class UserAPI {
     static putFollowUser(req, res) {
         //followed id
         const userID = req.body.userID;
-        if(!userID) {
-            return handleError("non-valid input", res);
-        }
+        if(!userID) return Utility.handleError("non-valid input", res);
         Auth.auth(req, (err, token) => {
-            if(err || userID == token._id) {
-               return handleError(err, res);
-            }
+            if(err || userID == token._id) return Utility.handleError(err, res);
             User.update({_id: token._id}, {$addToSet: {follows: userID}}, (err) => {
-                if(err) {
-                    return handleError(err, res);
-                }
-                return handleSuccess({}, res);
+                if(err) return Utility.handleError(err, res);
+                return Utility.handleSuccess({}, res);
             });        
         });
     }
@@ -274,18 +238,12 @@ export default class UserAPI {
     static putCancelFollowUser(req, res){
         //followed id
         const userID = req.body.userID;
-        if(!userID) {
-            return handleError("non-valid input", res);
-        }
+        if(!userID) return Utility.handleError("non-valid input", res);
         Auth.auth(req, (err, token) => {
-            if(err) {
-               return handleError(err, res);
-            }
+            if(err) return Utility.handleError(err, res);
             User.update({_id: token._id}, {$pull: {follows: userID}}, (err) => {
-                if(err) {
-                    return handleError(err, res);
-                }
-                return handleSuccess({}, res);
+                if(err) return Utility.handleError(err, res);
+                return Utility.handleSuccess({}, res);
             });        
         });
     }
